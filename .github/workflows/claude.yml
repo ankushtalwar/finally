@@ -30,6 +30,11 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Lets Claude run the backend test suite and linter (uv installs Python
+      # from backend/pyproject.toml on first use).
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -46,5 +51,6 @@ jobs:
           # Optional: Add claude_args to customize behavior and configuration
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
+          # Allow only uv commands (uv sync, uv run pytest / ruff); nothing broader.
+          claude_args: '--allowed-tools "Bash(uv sync *),Bash(uv run *)"'
 
