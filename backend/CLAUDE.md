@@ -25,7 +25,7 @@ from app.market import PriceCache, PriceUpdate, MarketDataSource, create_market_
   - `get_price(ticker) -> float | None`
   - `get_all() -> dict[str, PriceUpdate]`
   - `remove(ticker)`
-  - `version` property — monotonic counter, increments on every update (for SSE change detection)
+  - `version` property — monotonic counter, increments on every update and on every removal of a cached ticker (for SSE change detection)
 
 - **`MarketDataSource`** — Abstract interface implemented by `SimulatorDataSource` and `MassiveDataSource`. Lifecycle: `start(tickers)` -> `add_ticker()` / `remove_ticker()` -> `stop()`.
 
