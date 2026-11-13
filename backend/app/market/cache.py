@@ -20,22 +20,39 @@ class PriceCache:
         self._lock = Lock()
         self._version: int = 0  # Monotonically increasing; bumped on every update
 
-    def update(self, ticker: str, price: float, timestamp: float | None = None) -> PriceUpdate:
+    @staticmethod
+    def normalize(ticker: str) -> str:
+        """Canonical ticker form: stripped and upper-cased."""
+        return ticker.strip().upper()
+
+    def update(
+        self,
+        ticker: str,
+        price: float,
+        timestamp: float | None = None,
+        day_open: float | None = None,
+    ) -> PriceUpdate:
         """Record a new price for a ticker. Returns the created PriceUpdate.
 
         Automatically computes direction and change from the previous price.
         If this is the first update for the ticker, previous_price == price (direction='flat').
+        `day_open` (session reference price) is carried over from the previous update
+        when not supplied.
         """
+        ticker = self.normalize(ticker)
         with self._lock:
-            ts = timestamp or time.time()
+            ts = time.time() if timestamp is None else timestamp
             prev = self._prices.get(ticker)
             previous_price = prev.price if prev else price
+            if day_open is None and prev is not None:
+                day_open = prev.day_open
 
             update = PriceUpdate(
                 ticker=ticker,
                 price=round(price, 2),
                 previous_price=round(previous_price, 2),
                 timestamp=ts,
+                day_open=round(day_open, 2) if day_open is not None else None,
             )
             self._prices[ticker] = update
             self._version += 1
@@ -43,6 +60,7 @@ class PriceCache:
 
     def get(self, ticker: str) -> PriceUpdate | None:
         """Get the latest price for a single ticker, or None if unknown."""
+        ticker = self.normalize(ticker)
         with self._lock:
             return self._prices.get(ticker)
 
@@ -59,12 +77,14 @@ class PriceCache:
     def remove(self, ticker: str) -> None:
         """Remove a ticker from the cache (e.g., when removed from watchlist)."""
         with self._lock:
-            self._prices.pop(ticker, None)
+            if self._prices.pop(self.normalize(ticker), None) is not None:
+                self._version += 1
 
     @property
     def version(self) -> int:
         """Current version counter. Useful for SSE change detection."""
-        return self._version
+        with self._lock:
+            return self._version
 
     def __len__(self) -> int:
         with self._lock:
@@ -72,4 +92,4 @@ class PriceCache:
 
     def __contains__(self, ticker: str) -> bool:
         with self._lock:
-            return ticker in self._prices
+            return self.normalize(ticker) in self._prices

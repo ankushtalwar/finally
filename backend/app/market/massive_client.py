@@ -37,19 +37,34 @@ class MassiveDataSource(MarketDataSource):
         self._tickers: list[str] = []
         self._task: asyncio.Task | None = None
         self._client: RESTClient | None = None
+        self._consecutive_failures = 0
+        self._last_error: str | None = None
+        self._lock = asyncio.Lock()  # Serializes polls (loop vs. add_ticker)
+
+    @property
+    def healthy(self) -> bool:
+        """False while the most recent poll failed (bad key, rate limit, network)."""
+        return self._consecutive_failures == 0
+
+    @property
+    def last_error(self) -> str | None:
+        return self._last_error
 
     async def start(self, tickers: list[str]) -> None:
+        if self._task is not None and not self._task.done():
+            raise RuntimeError("MassiveDataSource already started")
         self._client = RESTClient(api_key=self._api_key)
-        self._tickers = list(tickers)
+        self._tickers = list(dict.fromkeys(t.strip().upper() for t in tickers))
 
         # Do an immediate first poll so the cache has data right away
         await self._poll_once()
 
         self._task = asyncio.create_task(self._poll_loop(), name="massive-poller")
         logger.info(
-            "Massive poller started: %d tickers, %.1fs interval",
-            len(tickers),
+            "Massive poller started: %d tickers, %.1fs interval (first poll %s)",
+            len(self._tickers),
             self._interval,
+            "ok" if self.healthy else "failed",
         )
 
     async def stop(self) -> None:
@@ -66,8 +81,11 @@ class MassiveDataSource(MarketDataSource):
     async def add_ticker(self, ticker: str) -> None:
         ticker = ticker.upper().strip()
         if ticker not in self._tickers:
-            self._tickers.append(ticker)
-            logger.info("Massive: added ticker %s (will appear on next poll)", ticker)
+            self._tickers = [*self._tickers, ticker]
+            logger.info("Massive: added ticker %s", ticker)
+            # Fetch immediately so the ticker has a price without waiting a full interval
+            if self._client:
+                await self._poll_once()
 
     async def remove_ticker(self, ticker: str) -> None:
         ticker = ticker.upper().strip()
@@ -83,7 +101,9 @@ class MassiveDataSource(MarketDataSource):
     async def _poll_loop(self) -> None:
         """Poll on interval. First poll already happened in start()."""
         while True:
-            await asyncio.sleep(self._interval)
+            # Exponential backoff while failing (e.g. 429), capped at 8x the interval
+            backoff = min(2**self._consecutive_failures, 8) if self._consecutive_failures else 1
+            await asyncio.sleep(self._interval * backoff)
             await self._poll_once()
 
     async def _poll_once(self) -> None:
@@ -91,20 +111,37 @@ class MassiveDataSource(MarketDataSource):
         if not self._tickers or not self._client:
             return
 
+        async with self._lock:
+            await self._poll_locked()
+
+    async def _poll_locked(self) -> None:
+        # Capture a copy on the event-loop thread; the worker thread must not
+        # see the list mutate underneath it.
+        requested = list(self._tickers)
+        if not requested or not self._client:
+            return
+
         try:
             # The Massive RESTClient is synchronous — run in a thread to
             # avoid blocking the event loop.
-            snapshots = await asyncio.to_thread(self._fetch_snapshots)
+            snapshots = await asyncio.to_thread(self._fetch_snapshots, requested)
+            self._consecutive_failures = 0
+            self._last_error = None
             processed = 0
             for snap in snapshots:
                 try:
+                    ticker = snap.ticker.strip().upper()
+                    # Drop results for tickers removed while the request was in flight
+                    if ticker not in self._tickers:
+                        continue
                     price = snap.last_trade.price
                     # Massive timestamps are Unix milliseconds → convert to seconds
                     timestamp = snap.last_trade.timestamp / 1000.0
                     self._cache.update(
-                        ticker=snap.ticker,
+                        ticker=ticker,
                         price=price,
                         timestamp=timestamp,
+                        day_open=self._prev_close(snap),
                     )
                     processed += 1
                 except (AttributeError, TypeError) as e:
@@ -116,13 +153,26 @@ class MassiveDataSource(MarketDataSource):
             logger.debug("Massive poll: updated %d/%d tickers", processed, len(self._tickers))
 
         except Exception as e:
-            logger.error("Massive poll failed: %s", e)
+            self._consecutive_failures += 1
+            self._last_error = str(e)
+            logger.error(
+                "Massive poll failed (%d in a row): %s", self._consecutive_failures, e
+            )
             # Don't re-raise — the loop will retry on the next interval.
             # Common failures: 401 (bad key), 429 (rate limit), network errors.
 
-    def _fetch_snapshots(self) -> list:
+    @staticmethod
+    def _prev_close(snap) -> float | None:
+        """Previous day's close from the snapshot, used as the daily-change reference."""
+        try:
+            close = snap.prev_day.close
+        except AttributeError:
+            return None
+        return close if isinstance(close, (int, float)) and close > 0 else None
+
+    def _fetch_snapshots(self, tickers: list[str]) -> list:
         """Synchronous call to the Massive REST API. Runs in a thread."""
         return self._client.get_snapshot_all(
             market_type=SnapshotMarketType.STOCKS,
-            tickers=self._tickers,
+            tickers=tickers,
         )

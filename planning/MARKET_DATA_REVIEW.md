@@ -106,4 +106,4 @@ Gaps to close:
 5. Add SSE tests and remove the deprecated conftest fixture.
 6. Housekeeping items (L1–L9).
 
-No source code was changed as part of this review.
+**Resolution:** all findings above were addressed (L2 intentionally left as is) — see `planning/MARKET_DATA_SUMMARY.md`. Final state: 97 tests passing, ruff clean, 99% coverage.
