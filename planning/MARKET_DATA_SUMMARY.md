@@ -1,6 +1,6 @@
 # Market Data Backend — Summary
 
-**Status:** Complete, tested, reviewed, all issues resolved.
+**Status:** Complete, tested, reviewed twice, all findings resolved.
 
 ## What Was Built
 
@@ -44,7 +44,7 @@ MarketDataSource (ABC)
 
 ## Test Suite
 
-**73 tests, all passing.** 6 test modules in `backend/tests/market/`.
+**97 tests, all passing (99% coverage).** 7 test modules in `backend/tests/market/`.
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
@@ -53,11 +53,23 @@ MarketDataSource (ABC)
 | test_simulator.py | 17 | simulator.py: 98% |
 | test_simulator_source.py | 10 | (integration tests) |
 | test_factory.py | 7 | factory.py: 100% |
+| test_review_fixes.py | 24 | stream.py: 100%, cache/models: 100% |
 | test_massive.py | 13 | massive_client.py: 56% (expected — API methods mocked) |
 
 Overall coverage: 84%.
 
-## Code Review & Fixes Applied
+## Second Review (planning/MARKET_DATA_REVIEW.md) — all findings addressed
+
+- **M1** `PriceUpdate.day_open` / `day_change_percent` (simulator: seed price; Massive: snapshot `prev_day.close`); included in SSE payload.
+- **M2** Tickers normalized (strip + upper) in cache, simulator and Massive; unknown-ticker simulator price is now deterministic (hash-based). Callers should still reject tickers with no cached price.
+- **M3** Router created per `create_stream_router` call; `CancelledError` re-raised; `PriceCache.remove()` bumps version (empty `{}` event emitted after last removal); `version` read under lock; `: keepalive` comments every 15 s; `Connection` header dropped.
+- **M4** Massive `add_ticker` polls immediately.
+- **M5** Poll uses a copy of the ticker list, serialized by a lock, and discards results for tickers removed mid-flight.
+- **L1** `timestamp=0.0` honoured. **L3** Injectable RNGs in `GBMSimulator`. **L4** Simulator buffers pre-start `add_ticker`; double `start()` raises `RuntimeError` (both sources). **L5** Fixed-cadence loop. **L6** Cholesky shrinkage fallback. **L7** `MassiveDataSource.healthy` / `last_error` and exponential backoff (max 8x interval) on failures; wiring into `/api/health` is left for the API layer. **L9** `rich` moved to dev extra; deprecated `event_loop_policy` fixture removed.
+- **L2** (2-dp rounding) intentionally unchanged — it matches display precision and the PLAN's price semantics.
+- **L8** Start log now reports whether the first poll succeeded.
+
+## Code Review & Fixes Applied (first review)
 
 A comprehensive code review identified 7 issues. All were resolved:
 
