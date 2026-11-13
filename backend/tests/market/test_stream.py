@@ -37,9 +37,10 @@ class TestGenerateEvents:
         frames = await _collect(_generate_events(PriceCache(), FakeRequest(0), interval=0))
         assert frames == ["retry: 1000\n\n"]
 
-    async def test_empty_cache_sends_no_data(self):
+    async def test_empty_cache_sends_one_empty_payload(self):
+        """An empty cache is still a state: one {} frame, then nothing until it changes."""
         frames = await _collect(_generate_events(PriceCache(), FakeRequest(3), interval=0))
-        assert frames == ["retry: 1000\n\n"]
+        assert frames == ["retry: 1000\n\n", "data: {}\n\n"]
 
     async def test_sends_all_prices_with_full_payload(self):
         cache = PriceCache()
@@ -60,6 +61,8 @@ class TestGenerateEvents:
             "change": 1.0,
             "change_percent": 0.5263,
             "direction": "up",
+            "day_open": None,
+            "day_change_percent": 0.0,
         }
 
     async def test_unchanged_version_sends_nothing_new(self):
