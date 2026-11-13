@@ -57,6 +57,10 @@ finally/
 └── scripts/     # Start/stop helpers
 ```
 
+## Documentation
+
+See [planning/SUMMARY.md](planning/SUMMARY.md) for the project summary and [planning/PLAN.md](planning/PLAN.md) for the full specification.
+
 ## License
 
 See [LICENSE](LICENSE).
