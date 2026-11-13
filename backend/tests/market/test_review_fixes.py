@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
+from massive.rest.models import TickerSnapshot
 
 from app.market.cache import PriceCache
 from app.market.massive_client import MassiveDataSource
@@ -16,14 +17,15 @@ from app.market.stream import _generate_events, create_stream_router
 
 
 def snap(ticker, price, prev_close=None, ts=1_700_000_000_000):
-    return SimpleNamespace(
-        ticker=ticker,
-        last_trade=SimpleNamespace(price=price, timestamp=ts),
-        prev_day=SimpleNamespace(close=prev_close),
-    )
+    """Real Massive snapshot; `ts` is Unix ms, stored as sip_timestamp in ns."""
+    d = {"ticker": ticker, "lastTrade": {"p": price, "t": ts * 1_000_000}}
+    if prev_close is not None:
+        d["prevDay"] = {"c": prev_close}
+    return TickerSnapshot.from_dict(d)
 
 
 # --- Cache ---
+
 
 def test_cache_zero_timestamp_preserved():
     assert PriceCache().update("AAPL", 10, timestamp=0.0).timestamp == 0.0
@@ -61,6 +63,7 @@ def test_day_change_percent_without_open():
 
 
 # --- Simulator ---
+
 
 def test_simulator_normalizes_and_dedupes():
     sim = GBMSimulator(["aapl", "AAPL"])
@@ -130,6 +133,7 @@ async def test_source_remove_ticker_clears_cache_case_insensitive():
 
 
 # --- Massive ---
+
 
 async def make_source(snaps_fn):
     cache = PriceCache()
@@ -216,6 +220,7 @@ async def test_massive_double_start_rejected():
 
 
 # --- SSE ---
+
 
 def test_routers_are_independent():
     r1 = create_stream_router(PriceCache())

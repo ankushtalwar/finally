@@ -44,19 +44,20 @@ MarketDataSource (ABC)
 
 ## Test Suite
 
-**97 tests, all passing (99% coverage).** 7 test modules in `backend/tests/market/`.
+**115 tests, all passing (99% coverage).** 8 test modules in `backend/tests/market/`.
 
 | Module | Tests | Coverage |
 |--------|-------|----------|
 | test_models.py | 11 | models.py: 100% |
-| test_cache.py | 13 | cache.py: 100% |
-| test_simulator.py | 17 | simulator.py: 98% |
+| test_cache.py | 15 | cache.py: 100% |
+| test_simulator.py | 19 | simulator.py: 99% |
 | test_simulator_source.py | 10 | (integration tests) |
 | test_factory.py | 7 | factory.py: 100% |
-| test_review_fixes.py | 24 | stream.py: 100%, cache/models: 100% |
-| test_massive.py | 13 | massive_client.py: 56% (expected — API methods mocked) |
+| test_massive.py | 19 | massive_client.py: 97% (real `TickerSnapshot` models) |
+| test_stream.py | 10 | stream.py: 100% |
+| test_review_fixes.py | 24 | cache/models/stream fixes; Massive helpers use real `TickerSnapshot` models |
 
-Overall coverage: 84%.
+Overall coverage: 99% (measured 2026-11-13).
 
 ## Second Review (planning/MARKET_DATA_REVIEW.md) — all findings addressed
 

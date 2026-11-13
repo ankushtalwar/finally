@@ -49,6 +49,21 @@ class TestPriceCache:
         cache = PriceCache()
         cache.remove("AAPL")  # Should not raise
 
+    def test_remove_bumps_version(self):
+        """Removing a ticker is a change SSE clients must see."""
+        cache = PriceCache()
+        cache.update("AAPL", 190.00)
+        before = cache.version
+        cache.remove("AAPL")
+        assert cache.version == before + 1
+
+    def test_remove_nonexistent_keeps_version(self):
+        """Removing an unknown ticker changes nothing, so no SSE resend."""
+        cache = PriceCache()
+        before = cache.version
+        cache.remove("AAPL")
+        assert cache.version == before
+
     def test_get_all(self):
         """Test getting all prices."""
         cache = PriceCache()
