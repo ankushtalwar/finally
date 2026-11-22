@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0d1117;
+  --color-panel: #11161e;
+  --color-raised: #171e28;
+  --color-line: #252d39;
+  --color-line-soft: #1c232d;
+  --color-text: #d5dbe3;
+  --color-muted: #7c8695;
+  --color-faint: #4f5866;
+  --color-up: #2ebd6e;
+  --color-down: #ef5350;
+  --color-accent: #ecad0a;
+  --color-blue: #209dd7;
+  --color-purple: #753991;
+  --color-purple-hi: #8b47ab;
+
+  --font-sans: "Inter", "SF Pro Text", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+:focus-visible {
+  outline: 1px solid var(--color-blue);
+  outline-offset: 1px;
+}
+
+/* Price flash: two keyframe names per direction so consecutive same-direction
+   ticks restart the animation. Fades over ~500ms. */
+@keyframes flash-up-a {
+  from { background-color: rgba(46, 189, 110, 0.38); }
+  to { background-color: rgba(46, 189, 110, 0); }
+}
+@keyframes flash-up-b {
+  from { background-color: rgba(46, 189, 110, 0.38); }
+  to { background-color: rgba(46, 189, 110, 0); }
+}
+@keyframes flash-down-a {
+  from { background-color: rgba(239, 83, 80, 0.38); }
+  to { background-color: rgba(239, 83, 80, 0); }
+}
+@keyframes flash-down-b {
+  from { background-color: rgba(239, 83, 80, 0.38); }
+  to { background-color: rgba(239, 83, 80, 0); }
+}
+.flash-up.flash-a { animation: flash-up-a 550ms ease-out; }
+.flash-up.flash-b { animation: flash-up-b 550ms ease-out; }
+.flash-down.flash-a { animation: flash-down-a 550ms ease-out; }
+.flash-down.flash-b { animation: flash-down-b 550ms ease-out; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.dot-reconnecting { animation: pulse-dot 1s ease-in-out infinite; }
+
+@keyframes typing {
+  0%, 80%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
+}
+.typing span { animation: typing 1.2s infinite; }
+.typing span:nth-child(2) { animation-delay: 0.15s; }
+.typing span:nth-child(3) { animation-delay: 0.3s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-up, .flash-down, .dot-reconnecting, .typing span { animation: none !important; }
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }

@@ -9,6 +9,8 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "numpy>=2.0.0",
     "massive>=1.0.0",
+    "anthropic>=2.8.0",
+    "python-dotenv>=1.2.1",
 ]
 
 [project.optional-dependencies]

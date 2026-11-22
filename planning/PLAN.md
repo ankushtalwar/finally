@@ -66,7 +66,7 @@ The user runs a single Docker command (or a provided start script). A browser op
 - **Backend**: FastAPI (Python), managed as a `uv` project
 - **Database**: SQLite, single file at `db/finally.db`, volume-mounted for persistence
 - **Real-time data**: Server-Sent Events (SSE) — simpler than WebSockets, one-way server→client push, works everywhere
-- **AI integration**: LiteLLM → OpenRouter (Cerebras for fast inference), with structured outputs for trade execution
+- **AI integration**: Anthropic Claude API via the official `anthropic` Python SDK, with structured outputs for trade execution
 - **Market data**: Environment-variable driven — simulator by default, real data via Massive API if key provided
 
 ### Why These Choices
@@ -121,8 +121,8 @@ finally/
 ## 5. Environment Variables
 
 ```bash
-# Required: OpenRouter API key for LLM chat functionality
-OPENROUTER_API_KEY=your-openrouter-api-key-here
+# Required for LLM chat (not needed when LLM_MOCK=true). Set the real value only in .env, never in this file.
+ANTHROPIC_API_KEY=
 
 # Optional: Massive (Polygon.io) API key for real market data
 # If not set, the built-in market simulator is used (recommended for most users)
@@ -281,9 +281,12 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 
 ## 9. LLM Integration
 
-When writing code to make calls to LLMs, use cerebras-inference skill to use LiteLLM via OpenRouter to the `openrouter/openai/gpt-oss-120b` model with Cerebras as the inference provider. Structured Outputs should be used to interpret the results.
+LLM calls use the Anthropic Claude API through the official `anthropic` Python SDK (no LiteLLM, no OpenRouter). Model: `claude-opus-5-5`, configured via a single constant so it can be changed in one place. Use the `claude-api` skill when writing this code.
 
-There is an OPENROUTER_API_KEY in the .env file in the project root.
+- **Auth**: `ANTHROPIC_API_KEY` from the `.env` file in the project root. The SDK reads it automatically (`anthropic.Anthropic()`).
+- **Structured outputs**: define the response schema as a Pydantic model and call `client.messages.parse(...)`, which validates the response against the schema. Do not parse free text or use assistant prefill (prefill is rejected by current models).
+- **Latency**: set `output_config={"effort": "low"}` for chat turns to keep responses fast, and keep `max_tokens` around 4,000 (responses are short JSON).
+- **Errors**: catch the SDK's typed exceptions (`RateLimitError`, `APIStatusError`, `APIConnectionError`) and check `stop_reason` (e.g. `"refusal"`, `"max_tokens"`) before reading the parsed output. On any failure, return a friendly assistant message and execute no actions.
 
 ### How It Works
 
@@ -292,11 +295,11 @@ When the user sends a chat message, the backend:
 1. Loads the user's current portfolio context (cash, positions with P&L, watchlist with live prices, total portfolio value)
 2. Loads recent conversation history from the `chat_messages` table
 3. Constructs a prompt with a system message, portfolio context, conversation history, and the user's new message
-4. Calls the LLM via LiteLLM → OpenRouter, requesting structured output, using the cerebras-inference skill
+4. Calls Claude via the Anthropic SDK (`client.messages.parse`) with the structured output schema
 5. Parses the complete structured JSON response
 6. Auto-executes any trades or watchlist changes specified in the response
 7. Stores the message and executed actions in `chat_messages`
-8. Returns the complete JSON response to the frontend (no token-by-token streaming — Cerebras inference is fast enough that a loading indicator is sufficient)
+8. Returns the complete JSON response to the frontend (no token-by-token streaming — responses are short JSON, so a loading indicator is sufficient)
 
 ### Structured Output Schema
 
@@ -339,7 +342,7 @@ The LLM should be prompted as "FinAlly, an AI trading assistant" with instructio
 
 ### LLM Mock Mode
 
-When `LLM_MOCK=true`, the backend returns deterministic mock responses instead of calling OpenRouter. This enables:
+When `LLM_MOCK=true`, the backend returns deterministic mock responses instead of calling the Anthropic API. This enables:
 - Fast, free, reproducible E2E tests
 - Development without an API key
 - CI/CD pipelines
@@ -454,3 +457,56 @@ The container is designed to deploy to AWS App Runner, Render, or any container 
 - Portfolio visualization: heatmap renders with correct colors, P&L chart has data points
 - AI chat (mocked): send a message, receive a response, trade execution appears inline
 - SSE resilience: disconnect and verify reconnection
+
+---
+
+## 13. Review: Questions, Clarifications & Simplification Opportunities
+
+### Critical
+
+1. ~~**A real API key is in this file.**~~ **Resolved:** the key was removed from Section 5. It should still be rotated, because it was exposed in a tracked file.
+2. ~~**The LLM env var names don't agree.**~~ **Resolved:** the project uses the Anthropic API directly (`ANTHROPIC_API_KEY`, official `anthropic` SDK). Sections 3, 5 and 9 now say so, and all OpenRouter, LiteLLM and Cerebras references are gone.
+3. **The Docker volume description contradicts itself.** Section 11 uses a named volume (`finally-data:/app/db`), then says the project-root `db/` directory maps to `/app/db`, which would be a bind mount. Pick one. The named volume is simpler and more portable across platforms. If you choose it, the top-level `db/` folder in Section 4 is only needed for local non-Docker runs.
+
+### Gaps in the API contract (agents will guess differently)
+
+4. **Response shapes are not defined.** Write example JSON for `GET /api/portfolio`, `GET /api/watchlist`, `GET /api/portfolio/history`, `POST /api/portfolio/trade` (success and error), and `POST /api/chat`, including the `actions` and error fields. This is the main contract between the frontend and backend agents.
+5. **Error convention.** Which status code should a failed trade return (400 vs 422)? What does the error body look like (`{"detail": "..."}`)? What happens when the LLM call fails or returns malformed JSON: a 500, or a 200 with a fallback message?
+6. **SSE event format.** Is it one event per ticker or one batched event per tick? Is there a named event type? Point to `MARKET_DATA_SUMMARY.md` if it already defines this, so frontend agents don't re-derive it.
+7. **"Daily change %" has no reference price.** Neither the simulator nor the cache tracks a daily open. Define it, for example as "% change from the session start / seed price", or drop it in favor of change since the last tick.
+
+### Behavior / edge cases to specify
+
+8. **Watchlist vs. positions vs. the price cache.**
+   - Can the user trade a ticker that is not on the watchlist?
+   - If they remove a watched ticker they still hold, does it keep getting priced? It must, or P&L breaks.
+   - Rule to state: the price universe = watchlist ∪ held tickers.
+9. **Unknown tickers.**
+   - What happens when a user adds `XYZQ`? Does the simulator create a random seed price, or is the add rejected?
+   - With Massive, invalid tickers need validation.
+   - If a ticker has no cached price yet, the trade should be rejected.
+10. **Trade rules.**
+    - Minimum quantity, and whether quantity must be greater than 0.
+    - Rounding and precision for fractional shares and cash.
+    - When a sell brings the quantity to 0, delete the position row. Use a small epsilon so float residue (e.g. `1e-12` shares) doesn't count as a holding.
+    - Should `avg_cost` stay unchanged on a sell? It should.
+11. **LLM chat details.**
+    - How many past messages go into the context (e.g. the last 20)?
+    - Does the LLM's trade go through the exact same service function as `POST /api/portfolio/trade`? It should.
+    - Trades in one response are executed in order. If one fails, do the rest still run?
+12. **Mock LLM behavior.** E2E tests need to know what the mock returns. Specify the trigger, e.g. "a message containing `buy` returns a trade for 1 share of AAPL; otherwise a fixed message." Without that, the test and backend agents can't agree.
+13. **Snapshot growth.** At 30-second intervals that's about 2,900 rows per day, which grows without limit. Is that acceptable, or should there be retention or downsampling? Also, a fresh start shows a nearly empty P&L chart, so record one snapshot at startup.
+14. **Static file serving.** Mount the API routes before the static mount at `/`. Also say how unknown paths fall back (to `index.html`, or a 404), since the Next.js export may produce `/foo.html` style routes.
+
+### Opportunities to Simplify
+
+- **Drop `docker-compose.yml`** for production. The start scripts already wrap `docker run`, so this is a third way to do the same thing. Keep compose only for `test/`.
+- **Pick one charting approach.**
+  - "Lightweight Charts or Recharts" leaves the choice open, and Lightweight Charts has no treemap.
+  - Suggestion: Lightweight Charts for the price and P&L charts, plus a tiny hand-rolled CSS/SVG treemap (squarified layout, about 50 lines).
+  - Alternatively, use Recharts for everything to keep it to a single dependency.
+- **Simplify snapshot recording.** Record snapshots from the existing market-data loop (every Nth tick) instead of a separate background task, and also record after each trade.
+- **Drop `id` UUIDs on `watchlist` and `positions`.** A composite primary key `(user_id, ticker)` already enforces uniqueness and removes a redundant column.
+- **Drop `change direction` from the SSE payload.** The client can derive it from `price` vs `previous_price`.
+- **Keep the E2E scope tight.** The "heatmap renders with correct colors" check is brittle. Asserting that a tile exists per position is enough.
+- **Windows scripts.** If the course audience allows, one cross-platform path (`docker run` documented in the README) could replace the four scripts. Otherwise keep them, but make them trivial wrappers.
