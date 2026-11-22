@@ -70,10 +70,28 @@ def _has_credentials(client: Any) -> bool:
     return any(getattr(client, a, None) is not None for a in _CREDENTIAL_ATTRS)
 
 
+def _clean_api_key() -> str | None:
+    """ANTHROPIC_API_KEY with stray whitespace/CR and wrapping quotes removed.
+
+    `docker run --env-file` passes values verbatim, so a trailing space, a CRLF line
+    ending or quotes in `.env` end up inside the key and make httpx reject the
+    Authorization header (surfacing as an APIConnectionError).
+    """
+    raw = os.environ.get("ANTHROPIC_API_KEY")
+    if raw is None:
+        return None
+    key = raw.strip().strip("\"'").strip()
+    return key or None
+
+
 def get_client() -> anthropic.AsyncAnthropic:
     global _client
     if _client is None:
-        client = anthropic.AsyncAnthropic(timeout=REQUEST_TIMEOUT_S, max_retries=2)
+        kwargs: dict[str, Any] = {"timeout": REQUEST_TIMEOUT_S, "max_retries": 2}
+        key = _clean_api_key()
+        if key:
+            kwargs["api_key"] = key
+        client = anthropic.AsyncAnthropic(**kwargs)
         if not _has_credentials(client):
             # Don't cache: a key added later (e.g. tests, reload) is picked up next call.
             raise anthropic.AnthropicError("No Anthropic credentials configured")
