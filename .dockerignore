@@ -1,0 +1,51 @@
+# Secrets and VCS
+**/.env
+**/.env.*
+!.env.example
+.git
+.gitignore
+.github
+.claude
+
+# Not needed in the image
+planning/
+independent-reviewer/
+test/
+scripts/
+db/
+*.md
+!backend/README.md
+curl
+LICENSE
+docker-compose*.yml
+
+# Node / Next.js
+**/node_modules
+**/.next
+frontend/out
+**/npm-debug.log*
+**/coverage
+**/*.tsbuildinfo
+**/test-results
+**/playwright-report
+
+# Python
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage
+**/htmlcov
+backend/tests
+backend/static
+**/*.db
+**/*.db-*
+**/*.sqlite*
+**/*.log
+
+# OS / editor
+**/.DS_Store
+**/.idea
+**/.vscode

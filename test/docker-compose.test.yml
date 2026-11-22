@@ -1,0 +1,51 @@
+# E2E test stack: the app (fresh DB, mock LLM) + a Playwright runner.
+# Run from the repo root or test/:
+#   docker compose -f test/docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from playwright
+#   docker compose -f test/docker-compose.test.yml down -v
+
+name: finally-e2e
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: finally:e2e
+    environment:
+      LLM_MOCK: "true"
+      MASSIVE_API_KEY: ""
+      FINALLY_DB_PATH: /app/db/finally.db
+    # No volume: every run starts with a fresh, seeded database.
+    networks:
+      default:
+        # Browsers must not reach the app as "app": .app is an HSTS-preloaded TLD,
+        # so Chromium forces http://app:8000 to HTTPS (ERR_SSL_PROTOCOL_ERROR).
+        aliases: [finally-app]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).status == 200 else 1)"
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  playwright:
+    # Keep the tag in lockstep with @playwright/test in package.json.
+    image: mcr.microsoft.com/playwright:v1.64.1-noble
+    depends_on:
+      app:
+        condition: service_healthy
+    working_dir: /e2e
+    environment:
+      BASE_URL: http://finally-app:8000
+      CI: "true"
+      npm_config_cache: /tmp/npm-cache
+    ipc: host
+    volumes:
+      - ./:/e2e
+      # Keep the container's node_modules separate from the host's.
+      - /e2e/node_modules
+    command: ["sh", "-c", "npm ci --no-audit --no-fund && npx playwright test"]

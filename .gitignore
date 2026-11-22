@@ -15,6 +15,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!frontend/lib/
 lib64/
 parts/
 sdist/
@@ -205,3 +206,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# FinAlly runtime SQLite database (volume mount target)
+db/*.db
+db/*.db-*
+
+# macOS / build artifacts
+.DS_Store
+backend/static/

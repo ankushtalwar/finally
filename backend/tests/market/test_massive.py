@@ -3,19 +3,17 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from massive.rest.models import TickerSnapshot
 
 from app.market.cache import PriceCache
-from app.market.massive_client import MassiveDataSource
+from app.market.massive_client import MassiveDataSource, parse_snapshot
 
 
-def _make_snapshot(ticker: str, price: float, timestamp_ms: int) -> MagicMock:
-    """Create a mock Massive snapshot object."""
-    snap = MagicMock()
-    snap.ticker = ticker
-    snap.last_trade = MagicMock()
-    snap.last_trade.price = price
-    snap.last_trade.timestamp = timestamp_ms
-    return snap
+def _make_snapshot(ticker: str, price: float, timestamp_ms: int) -> TickerSnapshot:
+    """Build a real Massive snapshot with a last trade (sip_timestamp in nanoseconds)."""
+    return TickerSnapshot.from_dict(
+        {"ticker": ticker, "lastTrade": {"p": price, "t": timestamp_ms * 1_000_000}}
+    )
 
 
 @pytest.mark.asyncio
@@ -56,9 +54,7 @@ class TestMassiveDataSource:
         source._client = MagicMock()  # Satisfy the _poll_once guard
 
         good_snap = _make_snapshot("AAPL", 190.50, 1707580800000)
-        bad_snap = MagicMock()
-        bad_snap.ticker = "BAD"
-        bad_snap.last_trade = None  # Will cause AttributeError
+        bad_snap = TickerSnapshot.from_dict({"ticker": "BAD"})  # no price data at all
 
         with patch.object(source, "_fetch_snapshots", return_value=[good_snap, bad_snap]):
             await source._poll_once()
@@ -199,3 +195,40 @@ class TestMassiveDataSource:
         assert cache.get_price("AAPL") == 190.50
 
         await source.stop()
+
+
+class TestParseSnapshot:
+    """parse_snapshot() against real TickerSnapshot models (fallback chain)."""
+
+    def test_last_trade_uses_sip_timestamp_nanoseconds(self):
+        snap = TickerSnapshot.from_dict(
+            {"ticker": "AAPL", "lastTrade": {"p": 190.5, "t": 1707580800123456789}}
+        )
+        ticker, price, ts = parse_snapshot(snap)
+        assert (ticker, price) == ("AAPL", 190.5)
+        assert ts == pytest.approx(1707580800.123456789)
+
+    def test_last_trade_without_timestamp_falls_back_to_updated(self):
+        snap = TickerSnapshot.from_dict(
+            {"ticker": "AAPL", "lastTrade": {"p": 190.5}, "updated": 1707580800000000000}
+        )
+        assert parse_snapshot(snap) == ("AAPL", 190.5, 1707580800.0)
+
+    def test_minute_bar_used_when_no_last_trade(self):
+        snap = TickerSnapshot.from_dict({"ticker": "MSFT", "min": {"c": 420.1, "t": 1707580800000}})
+        assert parse_snapshot(snap) == ("MSFT", 420.1, 1707580800.0)
+
+    def test_day_bar_used_when_no_trade_or_minute(self):
+        snap = TickerSnapshot.from_dict(
+            {"ticker": "JPM", "day": {"c": 195.0}, "updated": 1707580800000000000}
+        )
+        assert parse_snapshot(snap) == ("JPM", 195.0, 1707580800.0)
+
+    def test_prev_close_used_premarket(self):
+        snap = TickerSnapshot.from_dict({"ticker": "V", "day": {"c": 0}, "prevDay": {"c": 280.0}})
+        ticker, price, ts = parse_snapshot(snap)
+        assert (ticker, price) == ("V", 280.0)
+        assert ts > 0
+
+    def test_no_price_data_returns_none(self):
+        assert parse_snapshot(TickerSnapshot.from_dict({"ticker": "BAD"})) is None
